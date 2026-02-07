@@ -59,6 +59,7 @@
   "Face for PEG operators."
   :group 'peg)
 
+
 (defface peg-predicate-face
   '((t :inherit font-lock-builtin-face :slant italic))
   "Face for predicates (&, !)."
@@ -99,15 +100,15 @@
     
     ;; Punctuation
     (modify-syntax-entry ?: "." table)
-    (modify-syntax-entry ?; "." table)
-                         (modify-syntax-entry ?= "." table)
-                         (modify-syntax-entry ?, "." table)
-                         (modify-syntax-entry ?. "." table)
-                         (modify-syntax-entry ?| "." table)
-                         (modify-syntax-entry ?_ "_" table)
-                         
-                         table)
-    "Syntax table for peg-mode."))
+    (modify-syntax-entry ?\; "." table)
+    (modify-syntax-entry ?= "." table)
+    (modify-syntax-entry ?, "." table)
+    (modify-syntax-entry ?. "." table)
+    (modify-syntax-entry ?| "." table)
+    (modify-syntax-entry ?_ "_" table)
+    
+    table)
+  "Syntax table for peg-mode.")
 
 (defvar peg-font-lock-keywords
   `(
@@ -147,6 +148,26 @@
     )
   "Font-lock keywords for peg-mode.")
 
+
+(defun nest-level ()
+  (interactive)
+  (let ((line-no (line-number-at-pos)))
+    (save-excursion
+      (let ((nest-level 0))
+        (while (not (bobp))
+          (let ((pos1 (re-search-backward "{\\|}" nil t)))
+            (if pos1
+                (let ((c (char-after pos1)))
+                  (cond
+                   ((= c ?\{) (setq nest-level (1+ nest-level)))
+                   (t  (setq nest-level (- nest-level 1))))
+                  (forward-char -1))
+              (beginning-of-buffer))))
+        (if (> nest-level 0)
+            (message "line %d is in c block nest level %d\n" line-no nest-level)
+          (message "line %d is not in c block nest level %d\n" line-no nest-level))
+        nest-level))))
+
 (defun peg-indent-line ()
   "Indent current line in peg-mode."
   (interactive)
@@ -154,34 +175,51 @@
         (pos (point)))
     (save-excursion
       (beginning-of-line)
-      (cond
-       ;; Inside C code block
-       ((nth 8 (syntax-ppss))
-        (when peg-use-c-mode-indentation
-          (let ((c-indent-offset peg-indent-offset))
-            (c-indent-line))))
-       
-       ;; Rule definition
-       ((looking-at "^\\s-*[a-zA-Z_]")
-        (setq indent 0))
-       
-       ;; Continuation of previous line
-       (t
-        (forward-line -1)
-        (when (not (bobp))
-          (end-of-line)
-          (backward-char)
-          (cond
-           ;; After opening brace
-           ((looking-at "{")
-            (setq indent (+ (current-indentation) peg-indent-offset)))
-           ;; After rule operator
-           ((looking-at "\\s-*<-")
-            (setq indent (+ (current-indentation) peg-indent-offset)))
-           ;; Default: maintain same indentation
-           (t
-            (setq indent (current-indentation))))))))
-    (when (> indent 0)
+      (let ((current-nest-level (nest-level)))
+        (message "nest level is %d at line %d\n" current-nest-level (line-number-at-pos))
+        (cond
+         ;; Inside C code block
+         ((> current-nest-level 0)
+          (if (looking-at "^[ ]*}")
+              (progn
+                (message "will out of c block at line %d \n" (line-number-at-pos))
+                (if (> current-nest-level 1)
+                    (setq indent (* current-nest-level peg-indent-offset))
+                  (setq indent peg-indent-offset)))
+            (setq indent (* (1+  current-nest-level) peg-indent-offset))))
+         
+         ;; Rule definition
+         ((looking-at "^[ ]*[a-zA-Z_][a-zA-Z0-9_]*[ ]*<-[ ]*")
+          (message "found rule %d\n" (line-number-at-pos))
+          (setq indent 0))
+
+         ((looking-at "^[ ]*/")
+          (message "found rule continue %d\n" (line-number-at-pos))
+          (setq indent peg-indent-offset))
+
+         ((looking-at "^[ ]*%[a-zA-Z]")
+          (message "found peg keyword at line %d\n" (line-number-at-pos))
+          (setq indent 0))
+         
+         ;; Continuation of previous line
+         (t
+          (forward-line -1)
+          (when (not (bobp))
+            (end-of-line)
+            (backward-char)
+            (cond
+             ;; After opening brace
+             ((looking-at "{")
+              (setq indent (+ (current-indentation) peg-indent-offset)))
+             ;; After rule operator
+             ((looking-at "\\s-*<-")
+              (setq indent (+ (current-indentation) peg-indent-offset)))
+             ;; Default: maintain same indentation
+             (t
+              (setq indent (current-indentation)))))))))
+    (message "indent = %d at line %d" indent (line-number-at-pos))
+    (when (>= indent 0)
+      (message "indent to %d at line %d\n" indent (line-number-at-pos))
       (indent-line-to indent))
     (when (< (point) pos)
       (goto-char pos))))
